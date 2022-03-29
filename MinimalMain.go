@@ -2,19 +2,37 @@ package main
 
 import (
 	"embed"
+	"fmt"
+	"github.com/blizzy78/ebitenui/widget"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text"
+	"golang.org/x/image/colornames"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
+	"image/color"
 	"image/png"
 	"log"
+	"math/rand"
+	"os"
+	"time"
 )
 
 //go:embed assets/*
 var EmbeddedAssets embed.FS
 
 const (
-	GameWidth   = 1000
+	GameWidth   = 1400
 	GameHeight  = 700
-	PlayerSpeed = 2
+	PlayerSpeed = 5
+)
+
+var (
+	mplusNormalFont font.Face
+	mplusBigFont    font.Face
+	textWidget      *widget.Text
 )
 
 type Sprite struct {
@@ -28,7 +46,33 @@ type Sprite struct {
 type Game struct {
 	player  Sprite
 	score   int
+	enemy   []Sprite
 	drawOps ebiten.DrawImageOptions
+}
+
+func main() {
+	rand.Seed(int64(time.Now().Second()))
+	ebiten.SetWindowSize(GameWidth, GameHeight)
+	ebiten.SetWindowTitle("Golem Knight The IV")
+	simpleGame := Game{score: 0}
+	simpleGame.player = Sprite{
+		pict: loadPNGImageFromEmbedded("golem-preview.png"),
+		xloc: 200,
+		yloc: 300,
+		dX:   0,
+		dY:   0,
+	}
+	simpleGame.enemy = make([]Sprite, 10)
+	for i := 0; i < len(simpleGame.enemy); i++ {
+		simpleGame.enemy[i] = Sprite{
+			pict: loadPNGImageFromEmbedded("lpc_goblin_preview.png"),
+			xloc: rand.Intn(GameWidth - 50),
+			yloc: rand.Intn(GameHeight - 50),
+		}
+	}
+	if err := ebiten.RunGame(&simpleGame); err != nil {
+		log.Fatal("Oh no! something terrible happened and the game crashed", err)
+	}
 }
 
 func (g *Game) Update() error {
@@ -36,30 +80,178 @@ func (g *Game) Update() error {
 	return nil
 }
 
-func (g Game) Draw(screen *ebiten.Image) {
+func init() {
+	tt, err := opentype.Parse(fonts.MPlus1pRegular_ttf)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	const dpi = 72
+	mplusNormalFont, err = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    24,
+		DPI:     dpi,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	mplusBigFont, err = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    48,
+		DPI:     dpi,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+	const x = 20
+	screen.Fill(colornames.Crimson)
+	msg := fmt.Sprintf("%d", g.score)
 	g.drawOps.GeoM.Reset()
 	g.drawOps.GeoM.Translate(float64(g.player.xloc), float64(g.player.yloc))
 	screen.DrawImage(g.player.pict, &g.drawOps)
+	for i := 0; i < len(g.enemy); i++ {
+		g.drawOps.GeoM.Reset()
+		g.drawOps.GeoM.Translate(float64(g.enemy[i].xloc), float64(g.enemy[i].yloc))
+		screen.DrawImage(g.enemy[i].pict, &g.drawOps)
+		if collision(g.player, g.enemy[i]) {
+			g.score = g.score + 1
+			g.enemy = remove(g.enemy, i)
+		}
+	}
+	text.Draw(screen, msg, mplusNormalFont, x, 40, color.White)
+	if g.score == 10 {
+		//background := image.NewNineSliceColor(color.Gray16{})
+		//rootContainer := widget.NewContainer(
+		//	widget.ContainerOpts.Layout(widget.NewGridLayout(
+		//		widget.GridLayoutOpts.Columns(1),
+		//		widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true, false}),
+		//		widget.GridLayoutOpts.Padding(widget.Insets{
+		//			Top:    20,
+		//			Bottom: 20,
+		//		}),
+		//		widget.GridLayoutOpts.Spacing(0, 20))),
+		//	widget.ContainerOpts.BackgroundImage(background))
+		//MakeUIWindow()
+		//idle, err := loadImageNineSlice("button-idle.png", 20, 0)
+		//if err != nil {
+		//	log.Fatalln(err)
+		//}
+		//hover, err := loadImageNineSlice("button-hover.png", 20, 0)
+		//if err != nil {
+		//	log.Fatalln(err)
+		//}
+		//pressed, err := loadImageNineSlice("button-pressed.png", 20, 0)
+		//if err != nil {
+		//	log.Fatalln(err)
+		//}
+		//disabled, err := loadImageNineSlice("button-disabled.png", 20, 0)
+		//if err != nil {
+		//	log.Fatalln(err)
+		//}
+		//buttonImage := &widget.ButtonImage{
+		//	Idle:     idle,
+		//	Hover:    hover,
+		//	Pressed:  pressed,
+		//	Disabled: disabled,
+		//}
+		//button := widget.NewButton(
+		//	// specify the images to use
+		//	widget.ButtonOpts.Image(buttonImage),
+		//	// specify the button's text, the font face, and the color
+		//	widget.ButtonOpts.Text("Exit the game", basicfont.Face7x13, &widget.ButtonTextColor{
+		//		Idle: color.RGBA{0xdf, 0xf4, 0xff, 0xff},
+		//	}),
+		//	// specify that the button's text needs some padding for correct display
+		//	widget.ButtonOpts.TextPadding(widget.Insets{
+		//		Left:  30,
+		//		Right: 30,
+		//	}),
+		//	widget.ButtonOpts.ClickedHandler(FunctionNameHere),
+		//)
+		//rootContainer.AddChild(button)
+		text.Draw(screen, "Start Over? Left Click", mplusNormalFont, 40, 80, color.White)
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+			ebitenutil.DebugPrint(screen, "I haven't made this yet. 10/10 quality")
+		}
+		text.Draw(screen, "Retire? Right Click", mplusNormalFont, 80, 120, color.White)
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+			os.Exit(0)
+		}
+	}
 }
+
+//func loadImageNineSlice(path string, centerWidth int, centerHeight int) (*image.NineSlice, error) {
+//	i := loadPNGImageFromEmbedded(path)
+//
+//	w, h := i.Size()
+//	return image.NewNineSlice(i,
+//			[3]int{(w - centerWidth) / 2, centerWidth, w - (w-centerWidth)/2 - centerWidth},
+//			[3]int{(h - centerHeight) / 2, centerHeight, h - (h-centerHeight)/2 - centerHeight}),
+//		nil
+//}
+
+//func MakeUIWindow() (GUIhandler *ebitenui.UI) {
+//	background := image.NewNineSliceColor(color.Gray16{})
+//	rootContainer := widget.NewContainer(
+//		widget.ContainerOpts.Layout(widget.NewGridLayout(
+//			widget.GridLayoutOpts.Columns(1),
+//			widget.GridLayoutOpts.Stretch([]bool{true}, []bool{false, true, false}),
+//			widget.GridLayoutOpts.Padding(widget.Insets{
+//				Top:    20,
+//				Bottom: 20,
+//			}),
+//			widget.GridLayoutOpts.Spacing(0, 20))),
+//		widget.ContainerOpts.BackgroundImage(background))
+//	textInfo := widget.TextOptions{}.Text("This is our first Window", basicfont.Face7x13, color.White)
+//
+//	idle, err := loadImageNineSlice("button-idle.png", 20, 0)
+//	if err != nil {
+//		log.Fatalln(err)
+//	}
+//	hover, err := loadImageNineSlice("button-hover.png", 20, 0)
+//	if err != nil {
+//		log.Fatalln(err)
+//	}
+//	pressed, err := loadImageNineSlice("button-pressed.png", 20, 0)
+//	if err != nil {
+//		log.Fatalln(err)
+//	}
+//	disabled, err := loadImageNineSlice("button-disabled.png", 20, 0)
+//	if err != nil {
+//		log.Fatalln(err)
+//	}
+//	buttonImage := &widget.ButtonImage{
+//		Idle:     idle,
+//		Hover:    hover,
+//		Pressed:  pressed,
+//		Disabled: disabled,
+//	}
+//	button := widget.NewButton(
+//		// specify the images to use
+//		widget.ButtonOpts.Image(buttonImage),
+//		// specify the button's text, the font face, and the color
+//		widget.ButtonOpts.Text("Exit the game", basicfont.Face7x13, &widget.ButtonTextColor{
+//			Idle: color.RGBA{0xdf, 0xf4, 0xff, 0xff},
+//		}),
+//		// specify that the button's text needs some padding for correct display
+//		widget.ButtonOpts.TextPadding(widget.Insets{
+//			Left:  30,
+//			Right: 30,
+//		}),
+//		widget.ButtonOpts.ClickedHandler(FunctionNameHere),
+//	)
+//	rootContainer.AddChild(button)
+//	textWidget = widget.NewText(textInfo)
+//	rootContainer.AddChild(textWidget)
+//	GUIhandler = &ebitenui.UI{Container: rootContainer}
+//	return GUIhandler
+//}
 
 func (g Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
 	return GameWidth, GameHeight
-}
-
-func main() {
-	ebiten.SetWindowSize(GameWidth, GameHeight)
-	ebiten.SetWindowTitle("Minimal Game")
-	simpleGame := Game{score: 0}
-	simpleGame.player = Sprite{
-		pict: loadPNGImageFromEmbedded("f1-ship1-3.png"),
-		xloc: 200,
-		yloc: 300,
-		dX:   0,
-		dY:   0,
-	}
-	if err := ebiten.RunGame(&simpleGame); err != nil {
-		log.Fatal("Oh no! something terrible happened and the game crashed", err)
-	}
 }
 
 func loadPNGImageFromEmbedded(name string) *ebiten.Image {
@@ -111,3 +303,28 @@ func processPlayerInput(theGame *Game) {
 		theGame.player.xloc = GameWidth - theGame.player.pict.Bounds().Size().X
 	}
 }
+
+func collision(player, enemy Sprite) bool {
+	goldWidth, goldHeight := enemy.pict.Size()
+	playerWidth, playerHeight := player.pict.Size()
+	if player.xloc < enemy.xloc+goldWidth &&
+		player.xloc+playerWidth > enemy.xloc &&
+		player.yloc < enemy.yloc+goldHeight &&
+		player.yloc+playerHeight > enemy.yloc {
+		return true
+	}
+	return false
+}
+
+func remove(slice []Sprite, s int) []Sprite {
+	return append(slice[:s], slice[s+1:]...)
+}
+
+//func FunctionNameHere(args *widget.ButtonClickedEventArgs) {
+//	os.Exit(0)
+//}
+
+// https://stackoverflow.com/questions/37334119/how-to-delete-an-element-from-a-slice-in-golang
+// https://www.digitalocean.com/community/tutorials/understanding-init-in-go
+// https://github.com/jsantore/FirstGameDemo/blob/master/GmeEngineDemo.go
+// https://github.com/hajimehoshi/ebiten/wiki/Tutorial:Handle-user-inputs
